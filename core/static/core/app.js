@@ -1,0 +1,10 @@
+const stored=localStorage.getItem('integra-theme');
+document.documentElement.dataset.theme=stored||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+document.getElementById('theme')?.addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('integra-theme',next);});
+document.getElementById('nav-toggle')?.addEventListener('click',e=>{const open=document.getElementById('nav').classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',String(open));});
+document.querySelectorAll('.sidebar nav a').forEach(a=>{if(a.getAttribute('href')===location.pathname)a.classList.add('current');});
+document.querySelectorAll('[data-copy]').forEach(input=>input.addEventListener('click',()=>input.select()));
+document.querySelectorAll('[data-confirm]').forEach(form=>form.addEventListener('submit',event=>{if(!confirm(form.dataset.confirm))event.preventDefault();}));
+let dirty=false;
+document.querySelectorAll('[data-dirty]').forEach(form=>{form.addEventListener('input',()=>dirty=true);form.addEventListener('submit',()=>dirty=false);});
+window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
