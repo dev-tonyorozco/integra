@@ -1,6 +1,11 @@
 <?php
-namespace App\Models;
-class Applicant extends ScopedModel {
-protected function casts():array {return [];}
 
+namespace App\Models;
+
+class Applicant extends ScopedModel
+{
+    protected function casts(): array
+    {
+        return [];
+    }
 }

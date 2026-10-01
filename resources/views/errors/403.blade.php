@@ -1,0 +1,1 @@
+<x-layout title="403" public><section class="card receipt"><span class="eyebrow">403</span><h1>No tienes permiso para abrir esta página.</h1><a href="{{ route('home') }}">Volver al inicio</a></section></x-layout>

@@ -1,0 +1,1 @@
+<x-layout title="410" public><section class="card receipt"><span class="eyebrow">410</span><h1>Este enlace ya no está disponible.</h1><a href="{{ route('home') }}">Volver al inicio</a></section></x-layout>

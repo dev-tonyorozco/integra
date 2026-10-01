@@ -1,2 +1,5 @@
 User-agent: *
-Disallow:
+Disallow: /app
+Disallow: /tasks
+Disallow: /receipt
+Disallow: /password

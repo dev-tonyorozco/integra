@@ -1,28 +1,225 @@
 <?php
+
 namespace App\Http\Controllers;
-use App\Models\{Role,Area,Workflow,Questionnaire,Requirement,Process,Opportunity,Membership};
-use App\Services\{Access,Definitions};
+
+use App\Models\Area;
+use App\Models\Membership;
+use App\Models\Opportunity;
+use App\Models\Process;
+use App\Models\Questionnaire;
+use App\Models\Requirement;
+use App\Models\Role;
+use App\Models\Workflow;
+use App\Services\Access;
+use App\Services\Definitions;
+use BaconQrCode\Renderer\Image\SvgImageBackEnd;
+use BaconQrCode\Renderer\ImageRenderer;
+use BaconQrCode\Renderer\RendererStyle\RendererStyle;
+use BaconQrCode\Writer;
 use Illuminate\Http\Request;
-use Illuminate\Support\{Str,Facades\DB};
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-class CatalogController extends Controller {
- public const TYPES=['roles'=>[Role::class,'Roles'],'areas'=>[Area::class,'Áreas'],'workflows'=>[Workflow::class,'Flujos'],'questionnaires'=>[Questionnaire::class,'Cuestionarios'],'tests'=>[Questionnaire::class,'Pruebas'],'requirements'=>[Requirement::class,'Requisitos'],'processes'=>[Process::class,'Procesos'],'opportunities'=>[Opportunity::class,'Convocatorias']];
- public function __construct(public Access $access){}
- private function query(string $catalog){abort_unless(isset(self::TYPES[$catalog]),404);$q=$this->access->query(self::TYPES[$catalog][0]);if(in_array($catalog,['questionnaires','tests']))$q->where('is_test',$catalog==='tests');if($catalog==='areas')$q=$this->access->areas();if($catalog==='opportunities'&&$this->access->areaIds()!==null)$q->whereIn('area_id',$this->access->areaIds());return $q;}
- private function filtered(Request $r,string $catalog){$this->access->require('catalog.read');return $this->query($catalog)->when($r->filled('q'),fn($q)=>$q->where('search_text','like','%'.Str::lower(Str::ascii($r->q)).'%'))->when(in_array($r->status,['active','inactive']),fn($q)=>$q->where('active',$r->status==='active'));}
- public function index(Request $r,string $catalog){$records=$this->filtered($r,$catalog)->latest()->paginate(16)->withQueryString();return view('catalog.index',['records'=>$records,'catalog'=>$catalog,'title'=>self::TYPES[$catalog][1]]);}
- public function export(Request $r,string $catalog){return CaseController::csv($catalog.'.csv',['Nombre','Descripción','Activo','Versión','Publicado'],$this->filtered($r,$catalog)->get()->map(fn($x)=>[$x->name,$x->description,$x->active?'Sí':'No',$x->version??'',$x->published?'Sí':'No'])->all());}
- public function edit(string $catalog,?int $id=null){$this->access->require('catalog.write');$record=$id?$this->query($catalog)->findOrFail($id):null;$choices=['areas'=>$this->access->areas()->where('active',true)->get(),'members'=>$this->access->query(Membership::class)->with('user','role')->where('active',true)->get(),'roles'=>$this->access->query(Role::class)->get(),'workflows'=>$this->access->query(Workflow::class)->where('published',true)->get(),'questionnaires'=>$this->access->query(Questionnaire::class)->where('published',true)->where('is_test',false)->get(),'tests'=>$this->access->query(Questionnaire::class)->where('published',true)->where('is_test',true)->get(),'requirements'=>$this->access->query(Requirement::class)->where('published',true)->get(),'processes'=>$this->access->query(Process::class)->where('active',true)->get()];return view('catalog.edit',['catalog'=>$catalog,'title'=>self::TYPES[$catalog][1],'record'=>$record,'choices'=>$choices]);}
- public function duplicate(string $catalog,int $id){$this->access->require('catalog.write');abort_unless(in_array($catalog,['workflows','questionnaires','tests','requirements']),422);$old=$this->query($catalog)->findOrFail($id);$new=DB::transaction(function()use($old,$catalog){$versions=$this->query($catalog)->where('family_id',$old->family_id)->lockForUpdate()->get();$new=$old->replicate();$new->version=$versions->max('version')+1;$new->published=false;$new->save();return $new;});$this->access->audit('catalog.duplicated',$catalog.':'.$new->id);return redirect()->route('catalog.edit',[$catalog,$new->id]);}
- public function save(Request $r,string $catalog,?int $id=null){
-  $this->access->require('catalog.write');$model=self::TYPES[$catalog][0]??abort(404);$record=$id?$this->query($catalog)->findOrFail($id):new $model(['organization_id'=>$this->access->member->organization_id]);if($record->published&&in_array($catalog,['workflows','questionnaires','tests','requirements']))abort(422,'Duplica la versión publicada.');$v=$r->validate(['name'=>'required|string|max:160','description'=>'nullable|string|max:10000']);$v['description']=$v['description']??'';$v['active']=$r->boolean('active');$v['published']=$r->boolean('published');if(!in_array($catalog,['workflows','questionnaires','tests','requirements','opportunities']))unset($v['published']);
-  if(in_array($catalog,['workflows','questionnaires','tests','requirements'])){if(!$id)$v['family_id']=Str::uuid();if($catalog==='workflows'){$d=$this->json($r->definition);$v['definition']=Definitions::flow($d);$known=$this->access->query(Role::class)->pluck('code')->all();foreach($d['transitions'] as $t)if(array_diff($t['roles'],$known))Definitions::fail('El flujo usa un rol inexistente.');}if(in_array($catalog,['questionnaires','tests'])){$v['questions']=Definitions::questions($this->json($r->questions));$v['is_test']=$catalog==='tests';}}
-  if($catalog==='roles'){$r->validate(['permissions'=>'array','permissions.*'=>\Illuminate\Validation\Rule::in(Definitions::PERMISSIONS)]);$v['code']=$record->code??'CUSTOM_'.Str::upper(Str::random(8));$v['permissions']=$r->input('permissions',[]);$v['area_scope']=$r->boolean('area_scope');if($v['code']==='ORG_ADMIN'){$v['permissions']=Definitions::PERMISSIONS;$v['active']=true;$v['area_scope']=false;}if($v['code']==='AREA_MANAGER')$v['area_scope']=true;}
-  if($catalog==='areas'){$r->validate(['capacity'=>'required|integer|min:0|max:100000','leaders'=>'array','leaders.*'=>'integer','contacts'=>'array','contacts.*'=>'integer']);$v['capacity']=$r->integer('capacity');$v['normalized_name']=Str::lower(Str::ascii(trim($v['name'])));if($this->query($catalog)->where('normalized_name',$v['normalized_name'])->when($id,fn($q)=>$q->where('id','!=',$id))->exists())throw ValidationException::withMessages(['name'=>'Ya existe un área con este nombre.']);$v['requirements']=$this->requirements($r);if(count(array_unique($r->input('leaders',[])))>2)throw ValidationException::withMessages(['leaders'=>'Máximo dos líderes.']);foreach(['leaders','contacts'] as $kind)foreach($r->input($kind,[]) as $mid){$m=$this->access->query(Membership::class)->findOrFail($mid);$existing=$record->exists&&$record->contacts()->where('membership_id',$mid)->wherePivot('kind',$kind==='leaders'?'leader':'contact')->exists();if((!$m->active||!$m->user->active)&&!$existing)abort(422,'No puedes asignar contactos inactivos.');}}
-  if($catalog==='processes'){$r->validate(['workflow_id'=>'required|integer','questionnaire_id'=>'required|integer','test_ids'=>'array']);$v['workflow_id']=$this->access->query(Workflow::class)->where('published',true)->findOrFail($r->workflow_id)->id;$v['questionnaire_id']=$this->access->query(Questionnaire::class)->where('published',true)->where('is_test',false)->findOrFail($r->questionnaire_id)->id;$v['requirements']=$this->requirements($r);$v['test_ids']=array_map('intval',$r->input('test_ids',[]));foreach($v['test_ids'] as $tid)$this->access->query(Questionnaire::class)->where('published',true)->where('is_test',true)->findOrFail($tid);}
-  if($catalog==='opportunities'){$r->validate(['area_id'=>'required|integer','process_id'=>'required|integer','owner_id'=>'required|integer','closes_at'=>'nullable|date']);$v['area_id']=$this->access->areas()->where('active',true)->findOrFail($r->area_id)->id;$v['process_id']=$this->access->query(Process::class)->where('active',true)->findOrFail($r->process_id)->id;$v['owner_id']=$this->access->owner($r->integer('owner_id'),$v['area_id'])->id;$v['closes_at']=$r->closes_at;if(!$id)$v['slug']=Str::uuid();}
-  DB::transaction(function()use($record,$v,$catalog,$r){$record->fill($v)->save();if($catalog==='areas'){DB::table('area_contacts')->where('area_id',$record->id)->delete();foreach(['leaders'=>'leader','contacts'=>'contact'] as $key=>$kind)foreach(array_unique($r->input($key,[])) as $mid)DB::table('area_contacts')->insert(['area_id'=>$record->id,'membership_id'=>$mid,'kind'=>$kind]);}$this->access->audit('catalog.saved',$catalog.':'.$record->id);});return redirect()->route('catalog',$catalog)->with('status','Configuración guardada.');
- }
- private function json(?string $value):array{try{$d=json_decode($value??'',true,512,JSON_THROW_ON_ERROR);if(!is_array($d))throw new \RuntimeException;return $d;}catch(\Throwable){Definitions::fail('Definición inválida.');}}
- private function requirements(Request $r):array{$out=[];foreach($r->input('requirement_ids',[]) as $id){$this->access->query(Requirement::class)->where('published',true)->findOrFail($id);$out[]=['id'=>(int)$id,'mandatory'=>in_array($id,$r->input('mandatory_ids',[]))];}return $out;}
+
+class CatalogController extends Controller
+{
+    public const TYPES = ['roles' => [Role::class, 'Roles'], 'areas' => [Area::class, 'Áreas'], 'workflows' => [Workflow::class, 'Flujos'], 'questionnaires' => [Questionnaire::class, 'Cuestionarios'], 'tests' => [Questionnaire::class, 'Pruebas'], 'requirements' => [Requirement::class, 'Requisitos'], 'processes' => [Process::class, 'Procesos'], 'opportunities' => [Opportunity::class, 'Convocatorias']];
+
+    public function __construct(public Access $access) {}
+
+    private function query(string $catalog)
+    {
+        abort_unless(isset(self::TYPES[$catalog]), 404);
+        $q = $this->access->query(self::TYPES[$catalog][0]);
+        if (in_array($catalog, ['questionnaires', 'tests'])) {
+            $q->where('is_test', $catalog === 'tests');
+        }if ($catalog === 'areas') {
+            $q = $this->access->areas();
+        }if ($catalog === 'opportunities' && $this->access->areaIds() !== null) {
+            $q->whereIn('area_id', $this->access->areaIds());
+        }
+
+return $q;
+    }
+
+    private function filtered(Request $r, string $catalog)
+    {
+        $this->access->require('catalog.read');
+
+        return $this->query($catalog)->when($r->filled('q'), fn ($q) => $q->where('search_text', 'like', '%'.Str::lower(Str::ascii($r->q)).'%'))->when(in_array($r->status, ['active', 'inactive']), fn ($q) => $q->where('active', $r->status === 'active'));
+    }
+
+    public function index(Request $r, string $catalog)
+    {
+        $records = $this->filtered($r, $catalog)->latest()->paginate(16)->withQueryString();
+
+        return view('catalog.index', ['records' => $records, 'catalog' => $catalog, 'title' => self::TYPES[$catalog][1]]);
+    }
+
+    public function export(Request $r, string $catalog)
+    {
+        return CaseController::csv($catalog.'.csv', ['Nombre', 'Descripción', 'Activo', 'Versión', 'Publicado'], $this->filtered($r, $catalog)->get()->map(fn ($x) => [$x->name, $x->description, $x->active ? 'Sí' : 'No', $x->version ?? '', $x->published ? 'Sí' : 'No'])->all());
+    }
+
+    public function edit(string $catalog, ?int $id = null)
+    {
+        $this->access->require('catalog.write');
+        $record = $id ? $this->query($catalog)->findOrFail($id) : null;
+        $choices = ['areas' => $this->access->areas()->where('active', true)->get(), 'members' => $this->access->query(Membership::class)->with('user', 'role')->where('active', true)->get(), 'roles' => $this->access->query(Role::class)->get(), 'workflows' => $this->access->query(Workflow::class)->where('published', true)->get(), 'questionnaires' => $this->access->query(Questionnaire::class)->where('published', true)->where('is_test', false)->get(), 'tests' => $this->access->query(Questionnaire::class)->where('published', true)->where('is_test', true)->get(), 'requirements' => $this->access->query(Requirement::class)->where('published', true)->get(), 'processes' => $this->access->query(Process::class)->where('active', true)->get()];
+
+        return view('catalog.edit', ['catalog' => $catalog, 'title' => self::TYPES[$catalog][1], 'record' => $record, 'choices' => $choices]);
+    }
+
+    public function duplicate(string $catalog, int $id)
+    {
+        $this->access->require('catalog.write');
+        abort_unless(in_array($catalog, ['workflows', 'questionnaires', 'tests', 'requirements']), 422);
+        $old = $this->query($catalog)->findOrFail($id);
+        $new = DB::transaction(function () use ($old, $catalog) {
+            $versions = $this->query($catalog)->where('family_id', $old->family_id)->lockForUpdate()->get();
+            $new = $old->replicate();
+            $new->version = $versions->max('version') + 1;
+            $new->published = false;
+            $new->save();
+
+            return $new;
+        });
+        $this->access->audit('catalog.duplicated', $catalog.':'.$new->id);
+
+        return redirect()->route('catalog.edit', [$catalog, $new->id]);
+    }
+
+    public function save(Request $r, string $catalog, ?int $id = null)
+    {
+        $this->access->require('catalog.write');
+        $model = self::TYPES[$catalog][0] ?? abort(404);
+        $record = $id ? $this->query($catalog)->findOrFail($id) : new $model(['organization_id' => $this->access->member->organization_id]);
+        if ($record->published && in_array($catalog, ['workflows', 'questionnaires', 'tests', 'requirements'])) {
+            abort(422, 'Duplica la versión publicada.');
+        }$v = $r->validate(['name' => 'required|string|max:160', 'description' => 'nullable|string|max:10000']);
+        $v['description'] = $v['description'] ?? '';
+        $v['active'] = $r->boolean('active');
+        $v['published'] = $r->boolean('published');
+        if (! in_array($catalog, ['workflows', 'questionnaires', 'tests', 'requirements', 'opportunities'])) {
+            unset($v['published']);
+        }
+        if (in_array($catalog, ['workflows', 'questionnaires', 'tests', 'requirements'])) {
+            if (! $id) {
+                $v['family_id'] = Str::uuid();
+            }if ($catalog === 'workflows') {
+                $d = $this->json($r->definition);
+                $v['definition'] = Definitions::flow($d);
+                $known = $this->access->query(Role::class)->pluck('code')->all();
+                foreach ($d['transitions'] as $t) {
+                    if (array_diff($t['roles'], $known)) {
+                        Definitions::fail('El flujo usa un rol inexistente.');
+                    }
+                }
+            }if (in_array($catalog, ['questionnaires', 'tests'])) {
+                $v['questions'] = Definitions::questions($this->json($r->questions));
+                $v['is_test'] = $catalog === 'tests';
+            }
+        }
+        if ($catalog === 'roles') {
+            $r->validate(['permissions' => 'array', 'permissions.*' => Rule::in(Definitions::PERMISSIONS)]);
+            $v['code'] = $record->code ?? 'CUSTOM_'.Str::upper(Str::random(8));
+            $v['permissions'] = $r->input('permissions', []);
+            $v['area_scope'] = $r->boolean('area_scope');
+            if ($v['code'] === 'ORG_ADMIN') {
+                $v['permissions'] = Definitions::PERMISSIONS;
+                $v['active'] = true;
+                $v['area_scope'] = false;
+            }if ($v['code'] === 'AREA_MANAGER') {
+                $v['area_scope'] = true;
+            }
+        }
+        if ($catalog === 'areas') {
+            $r->validate(['capacity' => 'required|integer|min:0|max:100000', 'leaders' => 'array', 'leaders.*' => 'integer', 'contacts' => 'array', 'contacts.*' => 'integer']);
+            $v['capacity'] = $r->integer('capacity');
+            $v['normalized_name'] = Str::lower(Str::ascii(trim($v['name'])));
+            if ($this->query($catalog)->where('normalized_name', $v['normalized_name'])->when($id, fn ($q) => $q->where('id', '!=', $id))->exists()) {
+                throw ValidationException::withMessages(['name' => 'Ya existe un área con este nombre.']);
+            }$v['requirements'] = $this->requirements($r);
+            if (count(array_unique($r->input('leaders', []))) > 2) {
+                throw ValidationException::withMessages(['leaders' => 'Máximo dos líderes.']);
+            }foreach (['leaders', 'contacts'] as $kind) {
+                foreach ($r->input($kind, []) as $mid) {
+                    $m = $this->access->query(Membership::class)->findOrFail($mid);
+                    $existing = $record->exists && $record->contacts()->where('membership_id', $mid)->wherePivot('kind', $kind === 'leaders' ? 'leader' : 'contact')->exists();
+                    if ((! $m->active || ! $m->user->active) && ! $existing) {
+                        abort(422, 'No puedes asignar contactos inactivos.');
+                    }
+                }
+            }
+        }
+        if ($catalog === 'processes') {
+            $r->validate(['workflow_id' => 'required|integer', 'questionnaire_id' => 'required|integer', 'test_ids' => 'array']);
+            $v['workflow_id'] = $this->access->query(Workflow::class)->where('published', true)->findOrFail($r->workflow_id)->id;
+            $v['questionnaire_id'] = $this->access->query(Questionnaire::class)->where('published', true)->where('is_test', false)->findOrFail($r->questionnaire_id)->id;
+            $v['requirements'] = $this->requirements($r);
+            $v['test_ids'] = array_map('intval', $r->input('test_ids', []));
+            foreach ($v['test_ids'] as $tid) {
+                $this->access->query(Questionnaire::class)->where('published', true)->where('is_test', true)->findOrFail($tid);
+            }
+        }
+        if ($catalog === 'opportunities') {
+            $r->validate(['area_id' => 'required|integer', 'process_id' => 'required|integer', 'owner_id' => 'required|integer', 'closes_at' => 'nullable|date']);
+            $v['area_id'] = $this->access->areas()->where('active', true)->findOrFail($r->area_id)->id;
+            $v['process_id'] = $this->access->query(Process::class)->where('active', true)->findOrFail($r->process_id)->id;
+            $v['owner_id'] = $this->access->owner($r->integer('owner_id'), $v['area_id'])->id;
+            $v['closes_at'] = $r->closes_at;
+            if (! $id) {
+                $v['slug'] = Str::uuid();
+            }
+        }
+        DB::transaction(function () use ($record, $v, $catalog, $r) {
+            $record->fill($v)->save();
+            if ($catalog === 'areas') {
+                DB::table('area_contacts')->where('area_id', $record->id)->delete();
+                foreach (['leaders' => 'leader', 'contacts' => 'contact'] as $key => $kind) {
+                    foreach (array_unique($r->input($key, [])) as $mid) {
+                        DB::table('area_contacts')->insert(['area_id' => $record->id, 'membership_id' => $mid, 'kind' => $kind]);
+                    }
+                }
+            }$this->access->audit('catalog.saved', $catalog.':'.$record->id);
+        });
+
+        return redirect()->route('catalog', $catalog)->with('status', 'Configuración guardada.');
+    }
+
+    public function qr(int $id)
+    {
+        $this->access->require('catalog.read');
+        $o = $this->query('opportunities')->where('published', true)->findOrFail($id);
+        $renderer = new ImageRenderer(new RendererStyle(320), new SvgImageBackEnd);
+        $svg = (new Writer($renderer))->writeString(route('public.apply', $o->slug));
+
+        return response($svg, 200, ['Content-Type' => 'image/svg+xml', 'Content-Disposition' => 'attachment; filename="convocatoria.svg"']);
+    }
+
+    private function json(?string $value): array
+    {
+        try {
+            $d = json_decode($value ?? '', true, 512, JSON_THROW_ON_ERROR);
+            if (! is_array($d)) {
+                throw new \RuntimeException;
+            }
+
+return $d;
+        } catch (\Throwable) {
+            Definitions::fail('Definición inválida.');
+        }
+    }
+
+    private function requirements(Request $r): array
+    {
+        $out = [];
+        foreach ($r->input('requirement_ids',[]) as $id) {
+            $this->access->query(Requirement::class)->where('published',true)->findOrFail($id);
+            $out[] = ['id' => (int) $id, 'mandatory' => in_array($id,$r->input('mandatory_ids',[]))];
+        }
+
+return $out;
+    }
 }

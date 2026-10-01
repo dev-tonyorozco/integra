@@ -1,0 +1,9 @@
+<x-layout title="Persona"><x-heading :title="$m?'Editar persona':'Agregar persona'" subtitle="Asignar como líder o contacto nunca habilita acceso automáticamente."/><form method="post" class="card formcard">@csrf<x-field name="name" label="Nombre completo" :value="$m?->user->name??''" required/><x-field name="email" label="Correo" type="email" :value="$m?->user->email??''" help="Opcional para contactos; obligatorio si habilitas acceso."/><x-field name="phone" label="Teléfono" :value="$m?->user->phone??''"/><label class="inline"><input type="checkbox" name="active" value="1" @checked(old('active',$m?->active??true))>Membresía activa</label><label class="inline"><input type="checkbox" name="login_enabled" value="1" @checked(old('login_enabled',$m?->login_enabled??false))>Habilitar acceso a esta organización</label><label for="role_id">Rol</label><select id="role_id" name="role_id"><option value="">Sin rol</option>
+@foreach($roles as $role)
+<option value="{{ $role->id }}" @selected(old('role_id',$m?->role_id)==$role->id)>{{ $role->name }}{{ $role->active?'':' · inactivo' }}</option>
+@endforeach
+</select><fieldset><legend>Áreas autorizadas</legend><p class="muted">Obligatorias para Responsable de área. Gestión de solicitudes sin selección abarca todas las áreas.</p>
+@foreach($areas as $area)
+<label class="inline"><input type="checkbox" name="area_ids[]" value="{{ $area->id }}" @checked(in_array($area->id,old('area_ids',$m?->area_ids??[])))>{{ $area->name }}</label>
+@endforeach
+</fieldset><x-field name="password" type="password" label="Definir contraseña" help="Opcional. Mínimo 12 caracteres, mayúscula, minúscula y número. Déjala vacía para conservarla; el usuario puede recuperar acceso por correo." autocomplete="new-password"/><div class="actions"><button>Guardar persona</button><a href="{{ route('directory') }}">Cancelar</a></div></form></x-layout>
