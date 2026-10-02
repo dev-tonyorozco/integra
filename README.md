@@ -2,7 +2,7 @@
 
 Sistema PHP independiente para orientar, conectar y acompañar solicitudes de servicio. Laravel 13, PHP 8.3+, Blade, Alpine, Eloquent y Vite. Diseño basado en ENLACE: identidad roja/naranja/amarilla, Geist, barra lateral, tarjetas, tema claro/oscuro y navegación móvil.
 
-Esta rama `feat/integra-php-laravel` reemplaza el stack de la propuesta anterior en una rama nueva. No requiere ejecutar Django. La instalación real, el proyecto Supabase y el correo SMTP aún deben configurarse.
+Esta rama `feat/integra-php-laravel` reemplaza el stack de la propuesta anterior en una rama nueva. No requiere ejecutar Django. El proyecto Supabase ya está creado y tiene esquema privado; las tablas de Laravel, credenciales del servidor, Storage, SMTP y despliegue aún deben configurarse.
 
 ## Funciones
 
@@ -67,7 +67,7 @@ También admite `INTEGRA_ADMIN_PASSWORD` como variable privada del servidor. No 
 
 PHP conecta directamente con PostgreSQL de Supabase. INTEGRA usa autenticación Laravel; no depende de Supabase Auth ni expone sus tablas mediante la Data API.
 
-1. Crea el proyecto en la organización elegida. La cuenta `cerebralico` fue identificada; esta entrega no crea ni factura un proyecto.
+1. Proyecto **integra** creado en **cerebralico Org**, referencia `jvsiyjbnxzdlvoluxkkp`, región `us-east-1`, PostgreSQL 17 y costo de creación confirmado de $0/mes. [Abrir proyecto](https://supabase.com/dashboard/project/jvsiyjbnxzdlvoluxkkp). El esquema `integra` ya está preparado y se verificó que anon/authenticated no tienen acceso; el asesor de seguridad no reportó alertas en esta preparación. Aún no hay tablas de aplicación: se crean con las migraciones Laravel del paso 4.
 2. Copia la conexión desde **Connect**. Para servidor IPv4 usa **Session pooler**, puerto **5432**. La contraseña en `DB_URL` debe codificar caracteres reservados. No uses el pooler transaccional 6543 con esta configuración de PDO y estado de sesión.
 3. Configura variables privadas:
 
