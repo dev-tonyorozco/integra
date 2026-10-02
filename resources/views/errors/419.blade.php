@@ -1,0 +1,1 @@
+<x-layout title="419" public><section class="card receipt"><span class="eyebrow">419</span><h1>Tu sesión caducó. Recarga e inténtalo de nuevo.</h1><a href="{{ route('home') }}">Volver al inicio</a></section></x-layout>

@@ -1,0 +1,1 @@
+<x-layout :title="$task->name" public><section class="card formcard"><h1>{{ $task->name }}</h1><p class="muted">Enlace personal de un solo uso. Disponible hasta {{ $task->expires_at->format('d/m/Y') }}.</p><form method="post">@csrf<x-questions :questions="$task->questions"/><button>Enviar respuestas</button></form></section></x-layout>

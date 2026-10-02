@@ -1,0 +1,1 @@
+<x-layout title="429" public><section class="card receipt"><span class="eyebrow">429</span><h1>Demasiados intentos. Espera unos minutos.</h1><a href="{{ route('home') }}">Volver al inicio</a></section></x-layout>

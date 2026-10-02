@@ -1,0 +1,7 @@
+<x-layout title="Personas y acceso"><x-heading title="Personas y acceso" subtitle="Un directorio compartido de personas, líderes y contactos. El acceso se concede por separado."><a class="secondary" href="{{ route('directory.export',request()->query()) }}">Exportar CSV</a><a class="button" href="{{ route('directory.new') }}"><i data-lucide="user-plus"></i>Agregar persona</a></x-heading><form class="filters" method="get"><input name="q" value="{{ request('q') }}" aria-label="Buscar personas" placeholder="Nombre o correo"><select name="access" aria-label="Acceso"><option value="">Todos los accesos</option><option value="yes" @selected(request('access')==='yes')>Con acceso</option><option value="no" @selected(request('access')==='no')>Sin acceso</option></select><button class="secondary">Filtrar</button></form><section class="card"><div class="table-wrap"><table><thead><tr><th>Persona</th><th>Rol</th><th>Acceso</th><th>Estado</th><th></th></tr></thead><tbody>
+@forelse($records as $m)
+<tr><td><strong>{{ $m->user->name }}</strong><small>{{ $m->user->email??'Sin correo' }}</small><small>{{ $m->user->phone }}</small></td><td>{{ $m->role?->name??'Sin rol' }}</td><td><span class="pill">{{ $m->login_enabled?'Sí':'No' }}</span></td><td>{{ $m->active&&$m->user->active?'Activo':'Inactivo' }}</td><td><a href="{{ route('directory.edit',$m->id) }}">Editar</a></td></tr>
+@empty
+<tr><td colspan="5" class="empty">No se encontraron personas.</td></tr>
+@endforelse
+</tbody></table></div>{{ $records->links() }}</section></x-layout>

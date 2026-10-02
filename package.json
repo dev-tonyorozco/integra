@@ -1,0 +1,1 @@
+{"name":"integra","private":true,"type":"module","scripts":{"build":"vite build","dev":"vite"},"dependencies":{"alpinejs":"3.17.4","lucide":"0.577.0","@fontsource/geist":"5.3.0","@fontsource/geist-mono":"5.3.0"},"devDependencies":{"vite":"8.3.2","laravel-vite-plugin":"3.2.0"}}

@@ -1,0 +1,1 @@
+<x-layout title="Recuperar contraseña" public><section class="card formcard"><h1>Recuperar acceso</h1><p class="muted">Te enviaremos un enlace si este correo tiene acceso activo.</p><form method="post" action="{{ route('password.email') }}">@csrf<x-field name="email" type="email" label="Correo" required/><button>Enviar enlace</button></form></section></x-layout>

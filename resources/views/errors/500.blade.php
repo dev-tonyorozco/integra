@@ -1,0 +1,1 @@
+<x-layout title="500" public><section class="card receipt"><span class="eyebrow">500</span><h1>No pudimos completar la operación. Contacta al equipo.</h1><a href="{{ route('home') }}">Volver al inicio</a></section></x-layout>

@@ -1,0 +1,244 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+
+        Schema::table('users', function (Blueprint $t) {
+            $t->string('email')->nullable()->change();
+            $t->string('phone', 40)->default('');
+            $t->boolean('active')->default(true);
+            $t->text('search_text')->default('');
+        });
+        Schema::create('organizations', function (Blueprint $t) {
+            $t->id();
+            $t->string('name');
+            $t->string('slug')->unique();
+            $t->boolean('active')->default(true);
+            $t->text('privacy_notice');
+            $t->timestamps();
+        });
+        Schema::create('roles', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->string('name');
+            $t->text('description')->default('');
+            $t->text('search_text');
+            $t->string('code');
+            $t->json('permissions');
+            $t->boolean('area_scope')->default(false);
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+            $t->unique(['organization_id', 'code']);
+        });
+        Schema::create('memberships', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('user_id')->constrained();
+            $t->foreignId('role_id')->nullable()->constrained();
+            $t->json('area_ids');
+            $t->boolean('login_enabled')->default(false);
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+            $t->unique(['organization_id', 'user_id']);
+        });
+        Schema::create('areas', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->string('name');
+            $t->text('description')->default('');
+            $t->text('search_text');
+            $t->string('normalized_name');
+            $t->unsignedInteger('capacity')->default(10);
+            $t->json('requirements');
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+            $t->unique(['organization_id', 'normalized_name']);
+        });
+        Schema::create('area_contacts', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('area_id')->constrained();
+            $t->foreignId('membership_id')->constrained();
+            $t->string('kind');
+            $t->unique(['area_id', 'membership_id', 'kind']);
+        });
+        foreach (['workflows', 'questionnaires', 'requirements'] as $table) {
+            Schema::create($table, function (Blueprint $t) use ($table) {
+                $t->id();
+                $t->foreignId('organization_id')->constrained();
+                $t->uuid('family_id');
+                $t->string('name');
+                $t->text('description')->default('');
+                $t->text('search_text');
+                $t->unsignedInteger('version')->default(1);
+                $t->boolean('published')->default(false);
+                $t->boolean('active')->default(true);
+                if ($table === 'workflows') {
+                    $t->json('definition');
+                }if ($table === 'questionnaires') {
+                    $t->json('questions');
+                    $t->boolean('is_test')->default(false);
+                } $t->timestamps();
+                $t->unique(['organization_id', 'family_id', 'version']);
+            });
+        }
+        Schema::create('processes', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->string('name');
+            $t->text('description')->default('');
+            $t->text('search_text');
+            $t->foreignId('workflow_id')->constrained();
+            $t->foreignId('questionnaire_id')->constrained();
+            $t->json('requirements');
+            $t->json('test_ids');
+            $t->boolean('active')->default(true);
+            $t->timestamps();
+        });
+        Schema::create('opportunities', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->uuid('slug')->unique();
+            $t->string('name');
+            $t->text('description')->default('');
+            $t->text('search_text');
+            $t->foreignId('area_id')->constrained();
+            $t->foreignId('process_id')->constrained();
+            $t->foreignId('owner_id')->constrained('memberships');
+            $t->boolean('active')->default(true);
+            $t->boolean('published')->default(false);
+            $t->timestamp('closes_at')->nullable();
+            $t->timestamps();
+            $t->index(['organization_id', 'area_id']);
+        });
+        Schema::create('applicants', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->string('name');
+            $t->text('search_text');
+            $t->string('email');
+            $t->string('phone', 40);
+            $t->timestamps();
+            $t->index(['organization_id', 'email']);
+        });
+        Schema::create('applications', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('applicant_id')->constrained();
+            $t->foreignId('opportunity_id')->constrained();
+            $t->foreignId('area_id')->constrained();
+            $t->foreignId('owner_id')->constrained('memberships');
+            $t->string('folio')->unique();
+            $t->json('snapshot');
+            $t->json('answers');
+            $t->json('declarations');
+            $t->string('state');
+            $t->string('next_action');
+            $t->timestamp('due_at');
+            $t->timestamp('state_entered_at');
+            $t->timestamp('last_activity_at');
+            $t->timestamp('closed_at')->nullable();
+            $t->timestamp('pause_started')->nullable();
+            $t->text('pause_reason')->nullable();
+            $t->unsignedInteger('revision')->default(0);
+            $t->string('integration_function')->nullable();
+            $t->date('integration_date')->nullable();
+            $t->timestamp('consent_at');
+            $t->foreignId('duplicate_of')->nullable()->constrained('applications');
+            $t->timestamp('archived_at')->nullable();
+            $t->timestamps();
+            $t->index(['organization_id', 'area_id', 'state']);
+            $t->index(['owner_id', 'due_at']);
+        });
+        Schema::create('case_events', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('application_id')->constrained();
+            $t->foreignId('actor_id')->nullable()->constrained('users');
+            $t->string('kind');
+            $t->text('body');
+            $t->boolean('private')->default(false);
+            $t->json('metadata');
+            $t->timestamps();
+        });
+        Schema::create('public_tasks', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('application_id')->constrained();
+            $t->uuid('token')->unique();
+            $t->string('name');
+            $t->json('questions');
+            $t->boolean('is_test')->default(false);
+            $t->json('answers')->nullable();
+            $t->integer('score')->nullable();
+            $t->timestamp('expires_at');
+            $t->timestamp('completed_at')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('interviews', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('application_id')->constrained();
+            $t->timestamp('scheduled_at');
+            $t->string('interviewer');
+            $t->string('location');
+            $t->string('status')->default('scheduled');
+            $t->text('result')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('attachments', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('application_id')->constrained();
+            $t->string('name');
+            $t->string('path');
+            $t->string('mime');
+            $t->unsignedInteger('size');
+            $t->timestamps();
+        });
+        Schema::create('inbox_notifications', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('membership_id')->constrained();
+            $t->foreignId('application_id')->nullable()->constrained();
+            $t->string('message');
+            $t->string('dedupe_key')->nullable()->unique();
+            $t->timestamp('read_at')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('audit_logs', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('organization_id')->constrained();
+            $t->foreignId('actor_id')->nullable()->constrained('users');
+            $t->string('action');
+            $t->string('target');
+            $t->json('metadata');
+            $t->timestamps();
+            $t->index(['organization_id', 'created_at']);
+        });
+        if (DB::getDriverName() === 'pgsql') {
+            $schema = config('database.connections.pgsql.search_path');
+            foreach (Schema::getTables(schema: $schema) as $table) {
+                $name = $table['name'];
+                DB::statement('ALTER TABLE "'.$schema.'"."'.$name.'" ENABLE ROW LEVEL SECURITY');
+                foreach (['anon', 'authenticated'] as $role) {
+                    if (DB::selectOne('SELECT 1 FROM pg_roles WHERE rolname=?', [$role])) {
+                        DB::statement('REVOKE ALL ON "'.$schema.'"."'.$name.'" FROM "'.$role.'"');
+                    }
+                }
+            }
+        }
+
+    }
+
+    public function down(): void
+    {
+        throw new RuntimeException('Restauración manual requerida: no eliminar datos de INTEGRA.');
+    }
+};
